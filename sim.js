@@ -54,24 +54,46 @@ export function makeRoad(seed, trip) {
     if (i > 10) { c = Math.max(-0.06, Math.min(0.06, (c + (r() - 0.5) * 0.035) * 0.97)); h += c; }
     x += Math.sin(h) * STEP; z += Math.cos(h) * STEP;
   }
-  // ponytail: O(props × points) clearance scan, fine for <1k points; grid it if roads get huge
-  const clear = (px, pz, m) => !pts.some(p => (p.x - px) ** 2 + (p.z - pz) ** 2 < m * m);
+  const P = i => pts[Math.max(0, Math.min(n - 1, i))];
+  const at = (p, off, jit) => [p.x + Math.cos(p.h) * off + (r() - 0.5) * jit, p.z - Math.sin(p.h) * off + (r() - 0.5) * jit];
+  // abandoned cars: m 0 sedan, 1 suv, 2 bus. Some block the lanes, most are dumped on the shoulders
   const wrecks = [];
   for (let i = 25; i < n - 12; i += 7 + Math.floor(r() * 12)) {
     if (r() > 0.3 + 0.03 * trip) continue;
-    const p = pts[i], off = (r() - 0.5) * ROAD_W * 0.75;
-    wrecks.push({ x: p.x + Math.cos(p.h) * off, z: p.z - Math.sin(p.h) * off, h: p.h + (r() - 0.5) * 2.5, c: Math.floor(r() * 5) });
+    const [x, z] = at(pts[i], (r() - 0.5) * ROAD_W * 0.75, 0);
+    wrecks.push({ x, z, h: pts[i].h + (r() - 0.5) * 2.5, c: Math.floor(r() * 5), m: r() < 0.35 ? 1 : 0 });
   }
-  const props = [];
+  for (let i = 12; i < n - 6; i += 3 + Math.floor(r() * 9)) {
+    const side = r() < 0.5 ? -1 : 1, m = r() < 0.08 ? 2 : r() < 0.35 ? 1 : 0;
+    const [x, z] = at(pts[i], side * (ROAD_W / 2 + (m === 2 ? 1.5 : 0) + r() * 3), 1);
+    wrecks.push({ x, z, h: pts[i].h + (r() - 0.5) * 0.5 + (r() < 0.5 ? Math.PI : 0), c: Math.floor(r() * 5), m });
+  }
+  // ponytail: O(props × points) clearance scan, fine for <1k points; grid it if roads get huge
+  const clear = (px, pz, m) => !pts.some(p => (p.x - px) ** 2 + (p.z - pz) ** 2 < m * m);
+  const props = []; // k: 0 tree, 1 bush, 2 ruined building, 3 street lamp, 4 power pole
+  const put = (k, [x, z], margin, extra) => { if (clear(x, z, ROAD_W / 2 + margin)) props.push({ x, z, k, s: 0.7 + r() * 0.9, h: r() * 6.283, ...extra }); };
   for (let i = -15; i < n + 15; i++) for (const side of [-1, 1]) {
-    if (r() > 0.6) continue;
-    const p = pts[Math.max(0, Math.min(n - 1, i))], off = side * (ROAD_W / 2 + 4 + r() * r() * 70);
-    const kr = r(), k = kr < 0.62 ? 0 : kr < 0.88 ? 1 : 2; // tree, rock, house
-    const px = p.x + Math.cos(p.h) * off + (r() - 0.5) * 8, pz = p.z - Math.sin(p.h) * off + (r() - 0.5) * 8;
-    const s = 0.7 + r() * 0.9, ph = r() * 6.283;
-    if (clear(px, pz, ROAD_W / 2 + (k === 2 ? 7 : 2.5))) props.push({ x: px, z: pz, k, s, h: ph });
+    if (r() < 0.6) put(r() < 0.65 ? 0 : 1, at(P(i), side * (ROAD_W / 2 + 3 + r() * r() * 70), 8), 2);
   }
-  return { pts, wrecks, props, n };
+  for (let i = -10; i < n + 10; i += 5 + Math.floor(r() * 6)) {
+    const side = r() < 0.5 ? -1 : 1, w = 10 + r() * 14, d = 8 + r() * 10, ht = 8 + r() * r() * 40, half = Math.hypot(w, d) / 2;
+    put(2, at(P(i), side * (ROAD_W / 2 + 10 + half + r() * 80), 6), half + 3, { w, d, ht, h: P(i).h + (r() < 0.3 ? 0.3 : 0) });
+  }
+  for (let i = 4, side = 1; i < n; i += 9, side = -side) {
+    const [x, z] = at(pts[i], side * (ROAD_W / 2 + 1.3), 0);
+    props.push({ x, z, k: 3, s: 1, h: pts[i].h + (side > 0 ? 0 : Math.PI), tilt: r() < 0.25 ? (r() - 0.5) * 0.5 : 0 });
+  }
+  for (let i = 2; i < n; i += 8) {
+    const [x, z] = at(pts[i], -(ROAD_W / 2 + 8), 0);
+    props.push({ x, z, k: 4, s: 1, h: pts[i].h, tilt: (r() - 0.5) * 0.12 });
+  }
+  const obstacles = [];
+  for (const w of wrecks) {
+    if (w.m === 2) for (const s of [-1, 1]) obstacles.push({ x: w.x + Math.sin(w.h) * 3 * s, z: w.z + Math.cos(w.h) * 3 * s, r: 3.2 });
+    else obstacles.push({ x: w.x, z: w.z, r: w.m ? 3.8 : 3.6 });
+  }
+  for (const p of props) obstacles.push({ x: p.x, z: p.z, r: [1.6 + 0.4 * p.s, 1.4 + 0.8 * p.s, 1.5 + Math.hypot(p.w || 0, p.d || 0) / 2, 1.5, 1.6][p.k] });
+  return { pts, wrecks, props, obstacles, n };
 }
 
 export function nearestIdx(pts, x, z, hint) {
@@ -119,7 +141,7 @@ export function createSim(rnd = Math.random) {
   function startTrip() {
     S.seed = (rnd() * 1e9) | 0; S.roadTrip = S.trip;
     road = makeRoad(S.seed, S.trip);
-    obstacles = [...road.wrecks.map(w => ({ x: w.x, z: w.z, r: 3.6 })), ...road.props.map(p => ({ x: p.x, z: p.z, r: [1.6 + 0.4 * p.s, 1.5 + 1.3 * p.s, 2 + 3.2 * (0.8 + 0.3 * p.s)][p.k] }))];
+    obstacles = road.obstacles;
     const st = vanStats(S.up);
     S.van = { x: 0, z: 0, h: 0, spd: 0, hp: st.maxHp, maxHp: st.maxHp, i: 0, off: false };
     S.zs = []; hordes = []; spawnT = 3;
@@ -299,6 +321,7 @@ export function createSim(rnd = Math.random) {
       return;
     }
     if (m.t === 'equip') { if (p.owned.includes(m.w)) p.weapon = m.w; return; }
+    if (m.t === 'at') { p.at = ['bj', 'craps', 'roul'].includes(m.at) ? m.at : null; return; }
     if (S.phase !== 'shop') return;
     const bet = int(m.bet, p.money);
     switch (m.t) {
@@ -335,7 +358,7 @@ export function createSim(rnd = Math.random) {
       case 'bj':
         if (m.a === 'deal') {
           if ((p.bj && !p.bj.done) || !bet) return;
-          p.money -= bet; p.bj = bjDeal(rnd, bet);
+          p.money -= bet; p.bj = bjDeal(rnd, bet); p.bj.id = nextId++;
         } else if (p.bj && !p.bj.done) {
           if (m.a === 'hit') bjHit(rnd, p.bj);
           else if (m.a === 'stand') bjStand(rnd, p.bj);
@@ -349,6 +372,7 @@ export function createSim(rnd = Math.random) {
           p.money -= bet; p.craps = { bet, point: 0 };
         } else if (!p.craps || p.craps.done) return;
         crapsRoll(rnd, p.craps);
+        p.craps.rid = nextId++;
         payout(p, 'craps', p.craps);
         return;
       case 'roul': {
@@ -374,7 +398,7 @@ export function createSim(rnd = Math.random) {
       van: v && { x: r2(v.x), z: r2(v.z), h: r2(v.h), spd: r2(v.spd), hp: Math.ceil(v.hp), maxHp: v.maxHp, i: v.i, off: v.off, n: road.n },
       zs: S.zs.map(z => [z.id, z.t, r2(z.x), r2(z.z), r2(z.h), r2(z.y), z.dead ? 1 : z.atk ? 2 : 0]),
       ps: P().map(p => ({ id: p.id, name: p.name, color: p.color, money: p.money, owned: p.owned, weapon: p.weapon, ammo: p.ammo,
-        ready: p.ready, kills: p.kills, bj: p.bj, craps: p.craps, roul: p.roul, seat: seatOf(p.id), aim: p.in.aim })),
+        ready: p.ready, kills: p.kills, at: p.at, bj: p.bj, craps: p.craps, roul: p.roul, seat: seatOf(p.id), aim: p.in.aim })),
     };
   }
 

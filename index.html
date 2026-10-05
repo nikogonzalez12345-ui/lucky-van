@@ -71,17 +71,17 @@ details { color: #dbe4ff; font-size: 15px; } summary { cursor: pointer; font-wei
 #offroad { color: #ffa94d; }
 
 /* ---------- shop ---------- */
-#shop { align-items: stretch; background: rgba(20,30,70,.55); }
-.shopwrap { width: min(1180px, 100%); margin: auto; max-height: 100%; display: flex; flex-direction: column; background: var(--navy); border-radius: 28px; box-shadow: 0 10px 0 #16204d; overflow: hidden; }
-.shophead { display: flex; align-items: center; gap: 18px; padding: 18px 24px 12px; flex-wrap: wrap; }
-.shophead h2 { margin: 0; flex: 1; }
-#sMoney { font-size: 34px; }
-.tabs { display: flex; gap: 8px; padding: 0 24px; flex-wrap: wrap; }
-.tab { font: inherit; font-weight: 700; font-size: 17px; border: 0; padding: 10px 20px; border-radius: 16px 16px 0 0; background: #2f428f; color: #c5d0ff; cursor: pointer; }
-.tab.on { background: #31449a; color: #fff; background: #3a4fae; }
-.pane { background: #3a4fae; padding: 18px 24px; overflow: auto; flex: 1; min-height: 0; }
-.shopfoot { display: flex; align-items: center; gap: 14px; padding: 14px 24px; flex-wrap: wrap; }
-.shopfoot .hint { flex: 1; color: #c5d0ff; font-size: 15px; min-width: 200px; }
+#shop > * { position: fixed; z-index: 10; }
+.shopbar { top: 12px; left: 50%; transform: translateX(-50%); width: min(1100px, calc(100% - 24px)); display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: rgba(36,53,122,.92); border-radius: 22px; padding: 10px 16px; box-shadow: 0 6px 0 #16204d; }
+.shopbar h2 { margin: 0; font-size: 22px; }
+#sMoney { font-size: 30px; margin-left: auto; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tab { font: inherit; font-weight: 700; font-size: 16px; border: 0; padding: 8px 16px; border-radius: 999px; background: #2f428f; color: #c5d0ff; cursor: pointer; }
+.tab.on { background: var(--sun); color: var(--ink); }
+#shopPanel { top: 92px; bottom: 16px; left: 50%; transform: translateX(-50%); width: min(1100px, calc(100% - 24px)); background: rgba(36,53,122,.95); border-radius: 22px; box-shadow: 0 6px 0 #16204d; overflow: auto; }
+.pane { padding: 18px 22px; }
+.hint { color: #c5d0ff; margin: 0 0 12px; font-size: 15px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
 .card { background: #2a3a85; border-radius: 20px; padding: 14px 16px; box-shadow: 0 5px 0 #1b2766; display: flex; flex-direction: column; gap: 8px; }
 .card .desc { color: #c5d0ff; font-size: 14px; }
@@ -90,31 +90,15 @@ details { color: #dbe4ff; font-size: 15px; } summary { cursor: pointer; font-wei
 .btns { display: flex; gap: 6px; flex-wrap: wrap; }
 .stat { font-size: 14px; color: #dbe4ff; }
 .owned { color: var(--green); font-weight: 700; }
-
-/* ---------- casino ---------- */
-.tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 16px; }
-.table { background: radial-gradient(ellipse at 50% 30%, #2f9e62, var(--felt)); border: 8px solid #8a4b22; border-radius: 30px; padding: 14px 16px; box-shadow: 0 6px 0 #5c2f12, inset 0 0 30px rgba(0,0,0,.25); display: flex; flex-direction: column; gap: 10px; min-height: 300px; }
-.table h3 { color: var(--sun); text-align: center; letter-spacing: 1px; }
-.hand { display: flex; gap: 6px; min-height: 74px; align-items: center; flex-wrap: wrap; }
-.pc { width: 50px; height: 70px; border-radius: 8px; background: #fff; color: #222; font-weight: 700; font-size: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; box-shadow: 0 3px 0 rgba(0,0,0,.3); animation: pop .2s; }
-.pc.r { color: #e03131; } .pc.back { background: repeating-linear-gradient(45deg, #e03131 0 6px, #c92a2a 6px 12px); border: 3px solid #fff; }
-.lbl { font-size: 14px; color: #d3f9d8; }
-.result { text-align: center; font-weight: 700; font-size: 22px; min-height: 28px; color: var(--sun); }
-.betrow { display: flex; gap: 8px; align-items: center; margin-top: auto; flex-wrap: wrap; }
-.betrow input { width: 100px; padding: 7px 10px; font-size: 16px; }
-.dice { display: flex; gap: 14px; justify-content: center; min-height: 70px; align-items: center; }
-.die { width: 60px; height: 60px; background: #fff; border-radius: 12px; display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); padding: 8px; box-shadow: 0 4px 0 #ccc; }
-.die i { width: 11px; height: 11px; border-radius: 50%; background: #222; place-self: center; }
-.die.roll { animation: shake .4s; }
-@keyframes shake { 25% { transform: rotate(20deg) translateY(-8px); } 75% { transform: rotate(-15deg); } }
-.puck { text-align: center; font-weight: 700; }
-.ngrid { display: grid; grid-template-columns: repeat(13, 1fr); gap: 3px; }
-.ngrid button, .rbets button { font: inherit; font-weight: 700; font-size: 13px; border: 0; border-radius: 6px; padding: 5px 0; cursor: pointer; color: #fff; position: relative; }
-.ngrid .k { background: #212529; } .ngrid .r { background: #e03131; } .ngrid .g { background: #2b8a3e; grid-row: span 3; }
-.ngrid button b, .rbets button b { position: absolute; top: -6px; right: -4px; background: var(--sun); color: var(--ink); border-radius: 999px; font-size: 10px; padding: 1px 4px; }
-.rbets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; } .rbets button { background: rgba(0,0,0,.3); padding: 6px; }
-.wheel { margin: 0 auto; width: 74px; height: 74px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: 700; border: 6px solid var(--sun); background: #212529; }
-.wheel.r { background: #e03131; } .wheel.g { background: #2b8a3e; }
+#casinoUI { bottom: 16px; left: 50%; transform: translateX(-50%); width: min(760px, calc(100% - 24px)); display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; }
+#casinoUI > * { pointer-events: auto; }
+.tablepick { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.tablepick .btn.on { background: var(--sun); color: var(--ink); box-shadow: 0 5px 0 #c77d00; }
+.cbox { background: rgba(20,14,10,.82); border: 3px solid #8a4b22; border-radius: 22px; padding: 12px 18px; display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+#tInfo { font-weight: 700; font-size: 21px; color: var(--sun); text-align: center; min-height: 26px; }
+.betrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+.betrow input { width: 110px; padding: 8px 10px; font-size: 17px; }
+.lbl { font-size: 14px; color: #d3f9d8; font-weight: 600; }
 #over .panel { text-align: center; width: 420px; }
 </style>
 </head>
@@ -155,33 +139,36 @@ details { color: #dbe4ff; font-size: 15px; } summary { cursor: pointer; font-wei
   <div id="gunbox" class="out"></div>
 </div>
 
-<div id="shop" class="screen hidden">
-  <div class="shopwrap">
-    <div class="shophead"><h2 id="sTitle"></h2><div class="money out" id="sMoney"></div></div>
+<div id="shop" class="hidden">
+  <div class="shopbar">
+    <h2 id="sTitle"></h2>
     <div class="tabs">
-      <button class="tab on" data-tab="garage">GARAGE</button>
+      <button class="tab on" data-tab="casino">CASINO</button>
+      <button class="tab" data-tab="garage">GARAGE</button>
       <button class="tab" data-tab="armory">ARMORY</button>
-      <button class="tab" data-tab="casino">CASINO</button>
       <button class="tab" data-tab="crew">CREW</button>
     </div>
-    <div class="pane" id="p-garage"><div class="cards" id="sGarage"></div></div>
-    <div class="pane hidden" id="p-armory"><div class="cards" id="sArmory"></div></div>
-    <div class="pane hidden" id="p-casino">
-      <div class="tables">
-        <div class="table"><h3>BLACKJACK</h3><div id="bjT"></div>
-          <div class="betrow"><input id="bjBet" type="number" min="1" value="50"><span id="bjBtns"></span></div></div>
-        <div class="table"><h3>CRAPS · PASS LINE</h3><div id="crT"></div>
-          <div class="betrow"><input id="crBet" type="number" min="1" value="50"><span id="crBtns"></span></div></div>
-        <div class="table"><h3>ROULETTE</h3><div id="rlT"></div>
-          <div class="ngrid" id="rlGrid"></div>
-          <div class="rbets" id="rlOut"></div>
-          <div class="betrow"><span class="lbl">CHIP</span><input id="rlChip" type="number" min="1" value="25">
-            <button class="btn sm green" data-a="spin">SPIN</button><button class="btn sm ghost" data-a="rclear">CLEAR</button><span id="rlTotal" class="lbl"></span></div></div>
-      </div>
-    </div>
+    <div class="money out" id="sMoney"></div>
+    <button id="bReady" class="btn"></button>
+  </div>
+  <div id="shopPanel" class="hidden">
+    <div class="pane" id="p-garage"><p class="hint">Upgrades are pooled: anyone can chip in, and the upgrade kicks in when its bar fills.</p><div class="cards" id="sGarage"></div></div>
+    <div class="pane hidden" id="p-armory"><p class="hint">Guns and ammo are personal. Out of ammo means back to the pistol.</p><div class="cards" id="sArmory"></div></div>
     <div class="pane hidden" id="p-crew"><div class="cards" id="sCrew"></div></div>
-    <div class="shopfoot"><div class="hint">Upgrades are pooled: anyone can chip in, and the upgrade kicks in when its bar fills. Guns and ammo are personal.</div>
-      <button id="bReady" class="btn big green" style="width:auto"></button></div>
+  </div>
+  <div id="casinoUI">
+    <div class="tablepick">
+      <button class="btn ghost" data-table="bj">BLACKJACK</button>
+      <button class="btn ghost" data-table="craps">CRAPS</button>
+      <button class="btn ghost" data-table="roul">ROULETTE</button>
+    </div>
+    <div class="cbox">
+      <div id="tInfo" class="out"></div>
+      <div id="ctl-bj" class="betrow"><span class="lbl">BET</span><input id="bjBet" type="number" min="1" value="50"><span id="bjBtns"></span></div>
+      <div id="ctl-craps" class="betrow hidden"><span class="lbl">BET</span><input id="crBet" type="number" min="1" value="50"><span id="crBtns"></span></div>
+      <div id="ctl-roul" class="betrow hidden"><span class="lbl">CHIP</span><input id="rlChip" type="number" min="1" value="25">
+        <button class="btn green" data-a="spin">SPIN</button><button class="btn ghost" data-a="rclear">CLEAR</button></div>
+    </div>
   </div>
 </div>
 

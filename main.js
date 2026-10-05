@@ -1,6 +1,8 @@
 // main.js — rendering, input, networking (PeerJS, host-authoritative) and UI
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { lcg, canvasTex, geo, sphere, cap, box, rbox, cyl, mat, mesh, Z_SHIRTS, playerShirt, label, makeGuy } from './art.js';
+import { setupAtmosphere, buildWorld, updateWorld } from './world.js';
+import { createCasino } from './casino3d.js';
 import { createSim, makeRoad, ROAD_W, STEP, WEAPONS, UPGRADES, MAX_LVL, upPrice, SEATS, toWorld } from './sim.js';
 import { handValue, RED } from './casino.js';
 
@@ -9,7 +11,6 @@ const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 const fmt = n => Math.round(n).toLocaleString('en-US');
 const setHTML = (el, h) => { if (el._h !== h) { el._h = h; el.innerHTML = h; } };
 const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
-const lcg = s => () => (s = (s * 16807) % 2147483647) / 2147483647;
 
 // ======================= renderer =======================
 const canvas = $('gl');
@@ -19,128 +20,14 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 700);
-function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 1600);
+const sun = setupAtmosphere(scene, renderer);
+const casino = createCasino(renderer);
+function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); casino.resize(); }
 addEventListener('resize', resize); resize();
 
-function canvasTex(w, h, draw, repeat) {
-  const c = document.createElement('canvas'); c.width = w; c.height = h;
-  draw(c.getContext('2d'), w, h);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
-  if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  return t;
-}
-scene.background = canvasTex(4, 256, (g, w, h) => {
-  const gr = g.createLinearGradient(0, 0, 0, h);
-  gr.addColorStop(0, '#3f8fea'); gr.addColorStop(0.6, '#a9d8ff'); gr.addColorStop(1, '#e3f4ff');
-  g.fillStyle = gr; g.fillRect(0, 0, w, h);
-});
-scene.fog = new THREE.Fog('#cfeaff', 90, 260);
-scene.add(new THREE.HemisphereLight('#e3f1ff', '#7da35e', 1.5));
-const sun = new THREE.DirectionalLight('#fff0d4', 2.6);
-sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -45, right: 45, top: 45, bottom: -45, near: 1, far: 200 });
-sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04;
-scene.add(sun, sun.target);
 
-// ---------- shared geometry / materials ----------
-const GC = {}, MC = {};
-const geo = (k, make) => (GC[k] ||= make());
-const sphere = r => geo('s' + r, () => new THREE.SphereGeometry(r, 20, 14));
-const cap = (r, l) => geo(`c${r},${l}`, () => new THREE.CapsuleGeometry(r, l, 6, 14));
-const box = (x, y, z) => geo(`b${x},${y},${z}`, () => new THREE.BoxGeometry(x, y, z));
-const rbox = (x, y, z, r) => geo(`r${x},${y},${z},${r}`, () => new RoundedBoxGeometry(x, y, z, 4, r));
-const cyl = (a, b, h, n = 16) => geo(`y${a},${b},${h},${n}`, () => new THREE.CylinderGeometry(a, b, h, n));
-const mat = (c, o = {}) => (MC[c + JSON.stringify(o)] ||= new THREE.MeshStandardMaterial({ color: c, roughness: 0.55, ...o }));
-const mesh = (g, m, shadow = true) => { const o = new THREE.Mesh(g, m); o.castShadow = shadow; o.receiveShadow = true; return o; };
 
-function shirtTex(base, flower, leaf, seed) {
-  return canvasTex(256, 256, (g, w, h) => {
-    const r = lcg(seed);
-    g.fillStyle = base; g.fillRect(0, 0, w, h);
-    for (let i = 0; i < 22; i++) {
-      const x = r() * w, y = r() * h;
-      g.fillStyle = leaf; g.beginPath(); g.ellipse(x + 14, y + 8, 18, 7, r() * 3, 0, 7); g.fill();
-      g.fillStyle = flower;
-      for (let k = 0; k < 5; k++) { const a = k * 1.2566; g.beginPath(); g.arc(x + Math.cos(a) * 8, y + Math.sin(a) * 8, 7, 0, 7); g.fill(); }
-      g.fillStyle = '#ffe066'; g.beginPath(); g.arc(x, y, 4.5, 0, 7); g.fill();
-    }
-  }, true);
-}
-const rattyTex = (base, seed) => canvasTex(128, 128, (g, w, h) => {
-  const r = lcg(seed);
-  g.fillStyle = base; g.fillRect(0, 0, w, h);
-  for (let i = 0; i < 12; i++) { g.fillStyle = `rgba(70,45,20,${0.2 + r() * 0.3})`; g.beginPath(); g.ellipse(r() * w, r() * h, 6 + r() * 14, 4 + r() * 8, r() * 3, 0, 7); g.fill(); }
-  g.fillStyle = '#2a2a2a';
-  for (let i = 0; i < 5; i++) { const x = r() * w, y = r() * h; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 8, y + 14); g.lineTo(x - 6, y + 10); g.fill(); }
-}, true);
-const Z_SHIRTS = ['#8d6e63', '#6c7a89', '#a1887f', '#7b8d6a', '#9e7b9b', '#c2a878'].map((c, i) => new THREE.MeshStandardMaterial({ map: rattyTex(c, i + 5), roughness: 0.8 }));
-const P_SHIRTS = {};
-const playerShirt = color => (P_SHIRTS[color] ||= new THREE.MeshStandardMaterial({ map: shirtTex(color, '#ffffff', '#2f9e44', color.length * 97 + color.charCodeAt(1)), roughness: 0.7 }));
-const grassTex = canvasTex(128, 128, (g, w, h) => {
-  const r = lcg(11); g.fillStyle = '#7cc35a'; g.fillRect(0, 0, w, h);
-  for (let i = 0; i < 400; i++) { g.fillStyle = r() < 0.5 ? '#6db54e' : '#8fd06a'; g.fillRect(r() * w, r() * h, 2, 4); }
-}, true);
-const roadTex = canvasTex(256, 256, (g, w, h) => {
-  const r = lcg(3); g.fillStyle = '#50535c'; g.fillRect(0, 0, w, h);
-  for (let i = 0; i < 900; i++) { g.fillStyle = r() < 0.5 ? '#46494f' : '#5b5e67'; g.fillRect(r() * w, r() * h, 3, 3); }
-  g.fillStyle = '#f4f1e8'; g.fillRect(12, 0, 8, h); g.fillRect(w - 20, 0, 8, h);
-  g.fillStyle = '#ffc93c'; g.fillRect(w / 2 - 5, 30, 10, h / 2);
-}, true);
-const grassMat = new THREE.MeshStandardMaterial({ map: grassTex, roughness: 0.95 });
-const roadMat = new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.85, side: THREE.DoubleSide });
-const dirtMat = new THREE.MeshStandardMaterial({ color: '#c49a63', roughness: 1, side: THREE.DoubleSide });
-const crownMat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
-
-function label(text, color) {
-  const tex = canvasTex(256, 64, (g, w, h) => {
-    g.font = '700 38px Fredoka, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.lineWidth = 8; g.strokeStyle = '#1b2340'; g.strokeText(text, w / 2, h / 2);
-    g.fillStyle = color; g.fillText(text, w / 2, h / 2);
-  });
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
-  s.scale.set(3, 0.75, 1); s.renderOrder = 10;
-  return s;
-}
-
-// ======================= characters =======================
-const eyeW = mat('#ffffff', { roughness: 0.2 }), eyeB = mat('#111111', { roughness: 0.2 });
-function makeGuy(o) {
-  const g = new THREE.Group(), body = new THREE.Group(), sh = !o.zombie;
-  g.add(body);
-  const skin = mat(o.skin), pants = mat(o.pants);
-  const limb = (m, r, len, x, y) => {
-    const p = new THREE.Group(); p.position.set(x, y, 0); p.rotation.order = 'YXZ';
-    const l = mesh(cap(r, len), m, sh); l.position.y = -len / 2 - r * 0.3; p.add(l);
-    p.tip = -len - r * 0.6; body.add(p); return p;
-  };
-  const legL = limb(pants, 0.15, 0.42, 0.18, 0.8), legR = limb(pants, 0.15, 0.42, -0.18, 0.8);
-  for (const leg of [legL, legR]) {
-    const shoe = mesh(sphere(0.17), mat(o.shoes || '#7a4a24'), sh);
-    shoe.scale.set(1, 0.6, 1.4); shoe.position.set(0, leg.tip + 0.04, 0.07); leg.add(shoe);
-  }
-  const torso = mesh(cap(0.34, 0.42), o.shirt, sh); torso.position.y = 1.28; torso.scale.set(1.05, 1, 0.85); body.add(torso);
-  const armL = limb(o.shirt, 0.11, 0.48, 0.47, 1.66), armR = limb(o.shirt, 0.11, 0.48, -0.47, 1.66);
-  for (const a of [armL, armR]) { const hand = mesh(sphere(0.13), skin, sh); hand.position.y = a.tip; a.add(hand); }
-  const head = new THREE.Group(); head.position.y = 2.18; body.add(head);
-  const skull = mesh(sphere(0.44), skin, sh); skull.scale.set(1, 1.08, 0.95); head.add(skull);
-  const r = lcg(o.seed || 1);
-  for (const s of [1, -1]) { // big googly eyes
-    const eye = mesh(sphere(0.17), eyeW, false); eye.position.set(0.16 * s, 0.08, 0.33); head.add(eye);
-    const pu = mesh(sphere(o.zombie && s < 0 ? 0.04 : 0.065), eyeB, false);
-    pu.position.set(0.16 * s + (o.zombie ? (r() - 0.5) * 0.1 : 0), 0.08 + (o.zombie ? (r() - 0.5) * 0.1 : 0), 0.49); head.add(pu);
-  }
-  const nose = mesh(sphere(0.09), skin, false); nose.position.set(0, -0.06, 0.43); head.add(nose);
-  if (o.zombie) {
-    const m = mesh(sphere(0.12), mat('#3a1020'), false); m.scale.set(1.2, 0.7, 0.5); m.position.set(0, -0.24, 0.36); head.add(m);
-  } else {
-    const m = mesh(geo('smile', () => new THREE.TorusGeometry(0.12, 0.025, 6, 14, Math.PI)), mat('#5c1f1f'), false);
-    m.rotation.z = Math.PI; m.position.set(0, -0.2, 0.39); head.add(m);
-  }
-  if (o.hair) { const h = mesh(sphere(0.46), mat(o.hair), sh); h.scale.set(1.02, 0.6, 1.02); h.position.set(0, 0.24, -0.12); head.add(h); }
-  return { g, body, legL, legR, armL, armR, head, torso, ph: r() * 6 };
-}
 
 const blobGeo = new THREE.CircleGeometry(0.75, 18).rotateX(-Math.PI / 2);
 const blobMat = new THREE.MeshBasicMaterial({ color: '#000', transparent: true, opacity: 0.22, depthWrite: false });
@@ -218,90 +105,6 @@ const van = (() => {
   return { g, ride, wheels, looks, spin: 0 };
 })();
 
-// ======================= world =======================
-let world = null, worldGeos = [], builtSeed = null;
-const dummy = new THREE.Object3D(), tmpC = new THREE.Color();
-function ribbon(pts, half, y, m) {
-  const pos = [], uv = [], idx = [];
-  pts.forEach((p, i) => {
-    const cx = Math.cos(p.h), sz = -Math.sin(p.h), v = (i * STEP) / 10;
-    pos.push(p.x + cx * half, y, p.z + sz * half, p.x - cx * half, y, p.z - sz * half);
-    uv.push(0, v, 1, v);
-    if (i) { const a = i * 2 - 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
-  });
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  g.setIndex(idx); g.computeVertexNormals();
-  worldGeos.push(g);
-  return mesh(g, m, false);
-}
-function buildWorld(rd, trip) {
-  if (world) { scene.remove(world); worldGeos.forEach(g => g.dispose()); }
-  worldGeos = []; world = new THREE.Group(); scene.add(world);
-  const own = g => (worldGeos.push(g), g);
-  const xs = rd.pts.map(p => p.x), zs = rd.pts.map(p => p.z);
-  const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cz = (Math.min(...zs) + Math.max(...zs)) / 2;
-  const sw = Math.max(...xs) - Math.min(...xs) + 600, sh = Math.max(...zs) - Math.min(...zs) + 600;
-  const ground = mesh(own(new THREE.PlaneGeometry(sw, sh)), grassMat, false);
-  ground.rotation.x = -Math.PI / 2; ground.position.set(cx, 0, cz); grassTex.repeat.set(sw / 6, sh / 6);
-  world.add(ground, ribbon(rd.pts, ROAD_W / 2 + 1.6, 0.02, dirtMat), ribbon(rd.pts, ROAD_W / 2, 0.05, roadMat));
-
-  const trees = rd.props.filter(p => p.k === 0), rocks = rd.props.filter(p => p.k === 1), houses = rd.props.filter(p => p.k === 2);
-  const trunk = new THREE.InstancedMesh(own(new THREE.CylinderGeometry(0.22, 0.32, 2.4, 7)), mat('#8a5a35'), trees.length);
-  const crown = new THREE.InstancedMesh(own(new THREE.SphereGeometry(1.5, 14, 10)), crownMat, trees.length * 2);
-  trees.forEach((t, i) => {
-    const set = (m, j, x, y, z, s) => { dummy.position.set(x, y, z); dummy.rotation.set(0, t.h, 0); dummy.scale.setScalar(s); dummy.updateMatrix(); m.setMatrixAt(j, dummy.matrix); };
-    set(trunk, i, t.x, 1.2 * t.s, t.z, t.s);
-    set(crown, i * 2, t.x, 3.0 * t.s, t.z, t.s * 1.1);
-    set(crown, i * 2 + 1, t.x + 0.6 * t.s, 4.1 * t.s, t.z + 0.3 * t.s, t.s * 0.75);
-    crown.setColorAt(i * 2, tmpC.setHSL(0.26 + (t.h % 1) * 0.08, 0.55, 0.4));
-    crown.setColorAt(i * 2 + 1, tmpC.setHSL(0.27 + (t.h % 1) * 0.08, 0.6, 0.48));
-  });
-  const rock = new THREE.InstancedMesh(own(new THREE.DodecahedronGeometry(1, 0)), mat('#a3a8ad', { flatShading: true, roughness: 0.9 }), rocks.length);
-  rocks.forEach((t, i) => { dummy.position.set(t.x, 0.3 * t.s, t.z); dummy.rotation.set(0, t.h, 0); dummy.scale.set(t.s * 1.3, t.s * 0.8, t.s); dummy.updateMatrix(); rock.setMatrixAt(i, dummy.matrix); });
-  for (const m of [trunk, crown, rock]) { m.castShadow = m.receiveShadow = true; world.add(m); }
-
-  const roofGeo = geo('roof', () => new THREE.ConeGeometry(4.9, 2.4, 4).rotateY(Math.PI / 4));
-  for (const p of houses) {
-    const h = new THREE.Group(), c = ['#ffd8a8', '#ffc9c9', '#d0ebff', '#d3f9d8', '#fff3bf'][Math.floor(p.h * 10) % 5];
-    const add = (m, x, y, z) => { m.position.set(x, y, z); h.add(m); return m; };
-    add(mesh(box(6, 3.4, 5), mat(c)), 0, 1.7, 0);
-    add(mesh(roofGeo, mat('#d9480f')), 0, 4.6, 0).scale.z = 0.85;
-    add(mesh(box(1.1, 2, 0.1), mat('#7a4b2a')), 0, 1, 2.52);
-    for (const s of [1, -1]) add(mesh(box(1.1, 1, 0.1), mat('#a5d8ff', { roughness: 0.2 })), 1.9 * s, 2, 2.52);
-    h.position.set(p.x, 0, p.z); h.rotation.y = p.h; h.scale.setScalar(0.8 + p.s * 0.3);
-    world.add(h);
-  }
-  const WRECK = ['#b5655b', '#6f84c9', '#8f969c', '#c98a4b', '#5d6670'];
-  for (const w of rd.wrecks) {
-    const car = new THREE.Group();
-    const b = mesh(rbox(2.1, 1.1, 4.3, 0.35), mat(WRECK[w.c])); b.position.y = 0.75; car.add(b);
-    const top = mesh(rbox(1.8, 0.8, 2.2, 0.3), mat('#3b4252')); top.position.set(0, 1.55, -0.2); car.add(top);
-    car.position.set(w.x, 0, w.z); car.rotation.set(0, w.h, (w.c - 2) * 0.05);
-    world.add(car);
-  }
-  // the stop at the end of the road
-  const end = rd.pts[rd.n - 1], st = new THREE.Group();
-  st.position.set(end.x + Math.sin(end.h) * 6, 0, end.z + Math.cos(end.h) * 6); st.rotation.y = end.h;
-  const add = (m, x, y, z) => { m.position.set(x, y, z); st.add(m); return m; };
-  add(mesh(box(26, 0.1, 24), mat('#6c727a'), false), 0, 0.06, 0);
-  add(mesh(rbox(16, 0.8, 11, 0.3), mat('#ff6b6b')), 0, 5.6, 0);
-  add(mesh(box(16.1, 0.25, 11.1), mat('#ffffff')), 0, 5.15, 0);
-  for (const [x, z] of [[6, 4], [-6, 4], [6, -4], [-6, -4]]) add(mesh(cyl(0.3, 0.3, 5.2), mat('#ffffff')), x, 2.6, z);
-  for (const x of [-2.5, 2.5]) add(mesh(rbox(1, 1.6, 0.8, 0.15), mat('#ffd43b')), x, 0.8, 0);
-  add(mesh(cyl(0.2, 0.2, 7), mat('#ffffff')), 9, 3.5, 7);
-  const sign = add(mesh(box(4.4, 2.2, 0.3), mat('#ffd43b')), 9, 7.6, 7);
-  const signTex = canvasTex(256, 128, (g, w, h) => {
-    g.fillStyle = '#e03131'; g.fillRect(0, 0, w, h);
-    g.font = '700 64px Fredoka, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#fff';
-    g.fillText(`STOP #${trip}`, w / 2, h / 2 + 4);
-  });
-  const face = new THREE.Mesh(own(new THREE.PlaneGeometry(4, 1.9)), new THREE.MeshBasicMaterial({ map: signTex }));
-  face.position.z = -0.16; face.rotation.y = Math.PI; sign.add(face);
-  add(new THREE.Mesh(cyl(3, 3, 80, 24), new THREE.MeshBasicMaterial({ color: '#ffd43b', transparent: true, opacity: 0.16, depthWrite: false })), 0, 40, 0);
-  world.add(st);
-}
 
 // ======================= effects =======================
 const tracerMat = { def: new THREE.MeshBasicMaterial({ color: '#fff3a0' }), rocket: new THREE.MeshBasicMaterial({ color: '#ff922b' }) };
@@ -460,13 +263,13 @@ const localInput = () => ({
 
 // ======================= snapshot → scene =======================
 const zm = new Map(), pm = new Map(), vd = { x: 0, z: 0, h: 0, spd: 0 };
-let lastUp = '';
+let lastUp = '', builtSeed = null;
 function onSnap(s) {
   const prev = view?.ph;
   view = s; me = s.ps.find(p => p.id === myId);
   if (s.van && s.seed !== builtSeed) {
     builtSeed = s.seed;
-    buildWorld(makeRoad(s.seed, s.rt), s.rt);
+    buildWorld(scene, makeRoad(s.seed, s.rt), s.rt, s.seed);
     Object.assign(vd, s.van); snapCam = true;
   }
   const up = JSON.stringify(s.up);
@@ -526,7 +329,7 @@ const camPos = new THREE.Vector3(14, 9, -14), camLook = new THREE.Vector3(), ray
 const aimRing = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.7, 28).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#ffd43b', transparent: true, opacity: 0.8, depthWrite: false }));
 scene.add(aimRing);
 let snapCam = true, orbit = 0, last = performance.now(), netT = 0, sendT = 0, clock = 0;
-buildWorld(makeRoad(7, 1), 1); // scenery behind the title screen
+buildWorld(scene, makeRoad(7, 1), 1, 7); // scenery behind the title screen
 
 // The host simulates on a Worker timer: rAF stops in background tabs, and the host alt-tabbing must not freeze everyone.
 const ticker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 16)'])));
@@ -640,10 +443,12 @@ function render(dt) {
     q.el.style.opacity = 1 - q.t;
     if (q.t > 1) { q.el.remove(); pops.splice(i, 1); }
   }
-  renderer.render(scene, camera);
+  updateWorld(dt, clock);
+  if (view?.ph === 'shop') { casino.update(dt, clock); renderer.render(casino.scene, casino.camera); }
+  else renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
-if (location.hostname === 'localhost') window.lv = { get sim() { return sim; }, get view() { return view; }, zm, camera };
+if (location.hostname === 'localhost') window.lv = { get sim() { return sim; }, get view() { return view; }, zm, camera, casino };
 
 // ======================= UI =======================
 function showPhase(ph) {
@@ -653,7 +458,7 @@ function showPhase(ph) {
   $('shop').classList.toggle('hidden', ph !== 'shop');
   $('over').classList.toggle('hidden', ph !== 'over');
   $('bAgain').classList.toggle('hidden', !sim); $('oWait').classList.toggle('hidden', !!sim);
-  if (ph === 'shop') { $('rlTotal').textContent = ''; renderRoul(); }
+  if (ph === 'shop') { setTab('casino'); selectTable(casino.active); }
   firing = false;
 }
 function renderLobby(s) {
@@ -681,24 +486,17 @@ function updateHud(s) {
 }
 
 // ---------- shop ----------
-let rlBets = {}, lastRoul = 0, lastBj = '', lastCr = '';
-const RANK = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
-const cardHTML = (c, i, hidden) => {
-  if (hidden) return '<div class="pc back"></div>';
-  const suit = '♠♥♦♣'[(c + i * 3) % 4];
-  return `<div class="pc ${suit === '♥' || suit === '♦' ? 'r' : ''}">${RANK[c] || c}<span>${suit}</span></div>`;
-};
-const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
-const dieHTML = d => `<div class="die roll">${Array.from({ length: 9 }, (_, i) => (PIPS[d].includes(i) ? '<i></i>' : '<span></span>')).join('')}</div>`;
+let rlBets = {}, tab = 'casino', lastBj = null, lastCr = null, crShown = '', rlShown = '';
 const netText = s => { const n = s.ret - s.bet; return n > 0 ? `+$${fmt(n)}` : n < 0 ? `-$${fmt(-n)}` : '$0'; };
+const resultSfx = s => (s.ret > s.bet ? SFX.win : s.ret < s.bet ? SFX.lose : SFX.click)();
 
 function renderShop(s) {
   if (!me) return;
-  setHTML($('sTitle'), `PIT STOP · next up: trip ${s.trip}`);
+  setHTML($('sTitle'), `PIT STOP · next: trip ${s.trip}`);
   setHTML($('sMoney'), `$${fmt(me.money)}`);
   const ready = s.ps.filter(p => p.ready).length;
   setHTML($('bReady'), `${me.ready ? 'READY ✓' : 'READY UP'} (${ready}/${s.ps.length})`);
-  $('bReady').className = `btn big ${me.ready ? 'green' : ''}`;
+  $('bReady').className = `btn ${me.ready ? 'green' : ''}`;
 
   setHTML($('sGarage'), Object.entries(UPGRADES).map(([k, U]) => {
     const lvl = s.up[k], pips = Array.from({ length: MAX_LVL }, (_, i) => `<i class="${i < lvl ? 'on' : ''}"></i>`).join('');
@@ -721,71 +519,63 @@ function renderShop(s) {
   }).join(''));
 
   setHTML($('sCrew'), s.ps.map(p => `<div class="card"><div class="row"><span class="dot" style="background:${p.color}"></span><h3 style="flex:1;margin:0">${esc(p.name)}${p.id === myId ? ' (you)' : ''}</h3>${p.ready ? '<span class="owned">READY</span>' : ''}</div>
-    <div class="stat">${p.id === s.drv ? 'DRIVER' : 'GUNNER'} · ${fmt(p.kills)} kills · <span class="money">$${fmt(p.money)}</span> · ${WEAPONS[p.weapon].name}</div>
+    <div class="stat">${p.id === s.drv ? 'DRIVER' : 'GUNNER'} · ${fmt(p.kills)} kills · <span class="money">$${fmt(p.money)}</span> · ${WEAPONS[p.weapon].name}${p.at ? ` · at ${casino.TABLES[p.at].name.toLowerCase()}` : ''}</div>
     <div class="btns">${p.id === myId
       ? (p.id === s.drv ? '<span class="stat">You have the wheel</span>' : '<button class="btn sm" data-a="drive">TAKE THE WHEEL</button>')
       : [50, 250, 1000].map(a => `<button class="btn sm blue" data-a="gift" data-to="${esc(p.id)}" data-amt="${a}" ${me.money < a ? 'disabled' : ''}>GIVE $${a}</button>`).join('')}</div></div>`).join(''));
 
-  // blackjack
-  const bj = me.bj;
-  setHTML($('bjT'), bj ? `<div class="lbl">DEALER ${bj.done ? handValue(bj.d) : ''}</div><div class="hand">${bj.d.map((c, i) => cardHTML(c, i, !bj.done && i === 1)).join('')}</div>
-    <div class="lbl">YOU ${handValue(bj.p)} · bet $${fmt(bj.bet)}</div><div class="hand">${bj.p.map((c, i) => cardHTML(c, i + 2)).join('')}</div>
-    <div class="result">${bj.done ? `${bj.msg} ${netText(bj)}` : ''}</div>` : '<div class="result" style="margin-top:80px">Dealer stands on 17 · Blackjack pays 3:2</div>');
+  // ---- casino: the 3D tables animate; result text waits until the dice stop / the ball drops ----
+  casino.sync(me, s.ps, myId, rlBets);
+  const bj = me.bj, cr = me.craps, rl = me.roul, rolling = casino.rolling(), spinning = casino.spinning();
+  if (bj && (bj.id !== lastBj?.id || bj.done !== lastBj?.done)) { if (bj.done) setTimeout(() => resultSfx(bj), 350); else SFX.click(); }
+  lastBj = bj && { id: bj.id, done: bj.done };
+  if (cr && cr.rid !== lastCr) noise(0.5, 0.15, 2500);
+  lastCr = cr?.rid;
+  const crText = cr ? (rolling ? 'Rolling…' : `${cr.dice[0]} + ${cr.dice[1]} · ${cr.msg}${cr.done ? ` ${netText(cr)}` : ''}`) : '7 or 11 wins · 2, 3, 12 craps out · anything else sets the point';
+  if (crText !== crShown) { if (cr?.done && !rolling && crShown === 'Rolling…') resultSfx(cr); crShown = crText; }
+  const staged = Object.values(rlBets).reduce((a, b) => a + b, 0);
+  const rlText = spinning ? 'No more bets…' : rl ? `${rl.n} ${rl.n === 0 ? 'GREEN' : RED.has(rl.n) ? 'RED' : 'BLACK'} · ${netText(rl)}` : 'Click the felt to place chips, then SPIN';
+  if (rlText !== rlShown) { if (rl && !spinning && rlShown === 'No more bets…') resultSfx(rl); rlShown = rlText; }
+  setHTML($('tInfo'), {
+    bj: bj ? `YOU ${handValue(bj.p)} · DEALER ${bj.done ? handValue(bj.d) : '?'} · ${bj.done ? `${bj.msg} ${netText(bj)}` : `bet $${fmt(bj.bet)}`}` : 'Blackjack pays 3:2 · dealer stands on 17',
+    craps: crText,
+    roul: `${rlText}${staged ? ` · on the felt: $${fmt(staged)}` : ''}`,
+  }[casino.active]);
   setHTML($('bjBtns'), bj && !bj.done
-    ? `<button class="btn sm green" data-a="bj" data-x="hit">HIT</button> <button class="btn sm red" data-a="bj" data-x="stand">STAND</button> ${bj.p.length === 2 && me.money >= bj.bet ? '<button class="btn sm" data-a="bj" data-x="double">DOUBLE</button>' : ''}`
-    : '<button class="btn sm green" data-a="bj" data-x="deal">DEAL</button> <button class="btn sm ghost" data-a="allin" data-for="bjBet">ALL IN</button>');
-  const bjSig = JSON.stringify(bj);
-  if (bjSig !== lastBj) { if (bj?.done && lastBj) (bj.ret > bj.bet ? SFX.win : bj.ret < bj.bet ? SFX.lose : SFX.click)(); lastBj = bjSig; }
-
-  // craps
-  const cr = me.craps, crLive = cr && !cr.done;
-  setHTML($('crT'), `<div class="dice">${cr?.dice ? cr.dice.map(dieHTML).join('') : '<span class="lbl">7 or 11 wins · 2, 3, 12 loses · anything else sets the point</span>'}</div>
-    <div class="puck">${crLive ? `POINT: ${cr.point}` : 'POINT: OFF'}</div>
-    <div class="result">${cr ? `${cr.msg}${cr.done ? ` ${netText(cr)}` : ''}` : ''}</div>`);
-  setHTML($('crBtns'), crLive
-    ? `<span class="lbl">bet $${fmt(cr.bet)}</span> <button class="btn sm green" data-a="craps" data-x="roll">ROLL</button>`
-    : '<button class="btn sm green" data-a="craps" data-x="bet">BET & ROLL</button> <button class="btn sm ghost" data-a="allin" data-for="crBet">ALL IN</button>');
-  const crSig = JSON.stringify(cr);
-  if (crSig !== lastCr) { if (cr?.done && lastCr) (cr.ret > cr.bet ? SFX.win : SFX.lose)(); else if (cr) SFX.click(); lastCr = crSig; }
-
-  // roulette result (animated spin)
-  if (me.roul && me.roul.id !== lastRoul) {
-    lastRoul = me.roul.id;
-    const r = me.roul; let t = 0;
-    const tick = setInterval(() => {
-      const done = ++t >= 16, n = done ? r.n : Math.floor(Math.random() * 37);
-      setWheel(n, done ? `${n} ${n === 0 ? 'GREEN' : RED.has(n) ? 'RED' : 'BLACK'} · ${netText(r)}` : '');
-      if (done) { clearInterval(tick); (r.ret > r.bet ? SFX.win : SFX.lose)(); } else SFX.click();
-    }, 70 + t * 6);
-  }
+    ? `<button class="btn green" data-a="bj" data-x="hit">HIT</button> <button class="btn red" data-a="bj" data-x="stand">STAND</button> ${bj.p.length === 2 && me.money >= bj.bet ? '<button class="btn" data-a="bj" data-x="double">DOUBLE</button>' : ''}`
+    : '<button class="btn green" data-a="bj" data-x="deal">DEAL</button> <button class="btn ghost" data-a="allin" data-for="bjBet">ALL IN</button>');
+  setHTML($('crBtns'), cr && !cr.done
+    ? `<span class="lbl">bet $${fmt(cr.bet)} · point ${cr.point}</span> <button class="btn green" data-a="craps" data-x="roll" ${rolling ? 'disabled' : ''}>ROLL</button>`
+    : `<button class="btn green" data-a="craps" data-x="bet" ${rolling ? 'disabled' : ''}>BET & ROLL</button> <button class="btn ghost" data-a="allin" data-for="crBet">ALL IN</button>`);
+  for (const k of ['bj', 'craps', 'roul']) $(`ctl-${k}`).classList.toggle('hidden', casino.active !== k);
+  document.querySelectorAll('[data-table]').forEach(b => b.classList.toggle('on', b.dataset.table === casino.active));
 }
-function setWheel(n, text) {
-  $('rlT').innerHTML = `<div class="wheel ${n === 0 ? 'g' : RED.has(n) ? 'r' : ''}">${n}</div><div class="result">${text}</div>`;
+function setTab(t) {
+  tab = t;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('hidden', p.id !== `p-${t}`));
+  $('shopPanel').classList.toggle('hidden', t === 'casino');
+  $('casinoUI').classList.toggle('hidden', t !== 'casino');
 }
-function renderRoul() {
-  const chip = key => (rlBets[key] ? `<b>${fmt(rlBets[key])}</b>` : '');
-  let h = `<button class="g" style="grid-column:1;grid-row:1/4" data-a="rbet" data-k="n" data-n="0">0${chip('n0')}</button>`;
-  for (let n = 1; n <= 36; n++) {
-    h += `<button class="${RED.has(n) ? 'r' : 'k'}" style="grid-column:${Math.ceil(n / 3) + 1};grid-row:${3 - ((n - 1) % 3)}" data-a="rbet" data-k="n" data-n="${n}">${n}${chip('n' + n)}</button>`;
-  }
-  $('rlGrid').innerHTML = h;
-  $('rlOut').innerHTML = [['red', 'RED'], ['black', 'BLACK'], ['odd', 'ODD'], ['even', 'EVEN'], ['low', '1–18'], ['high', '19–36'], ['d1', '1st 12'], ['d2', '2nd 12'], ['d3', '3rd 12']]
-    .map(([k, t]) => `<button data-a="rbet" data-k="${k}">${t}${chip(k)}</button>`).join('');
-  const total = Object.values(rlBets).reduce((a, b) => a + b, 0);
-  $('rlTotal').textContent = total ? `on the table: $${fmt(total)}` : '';
-  if (!$('rlT').innerHTML) $('rlT').innerHTML = '<div class="wheel">?</div><div class="result">Click the felt to place chips</div>';
-}
+function selectTable(t) { casino.setActive(t); send({ t: 'at', at: t }); }
+canvas.addEventListener('pointerdown', e => {
+  if (view?.ph !== 'shop' || tab !== 'casino' || e.button !== 0) return;
+  mouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); // taps have no pointermove first
+  const hit = casino.pick(mouse);
+  if (hit?.bet) {
+    if (casino.spinning()) return;
+    rlBets[hit.bet] = (rlBets[hit.bet] || 0) + Math.max(1, Math.floor(+$('rlChip').value || 0));
+    tone(1400, 0.05, 'triangle', 0.05);
+  } else if (hit?.table && hit.table !== casino.active) selectTable(hit.table);
+});
 
 $('shop').addEventListener('click', e => {
-  const b = e.target.closest('[data-a],[data-tab]');
+  const b = e.target.closest('[data-a],[data-tab],[data-table]');
   if (!b || b.disabled) return;
   const d = b.dataset;
   SFX.click();
-  if (d.tab) {
-    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t === b));
-    document.querySelectorAll('.pane').forEach(p => p.classList.toggle('hidden', p.id !== `p-${d.tab}`));
-    return;
-  }
+  if (d.tab) return setTab(d.tab);
+  if (d.table) return selectTable(d.table);
   switch (d.a) {
     case 'fund': send({ t: 'fund', k: d.k, amt: +d.amt }); break;
     case 'buy': case 'ammo': case 'equip': send({ t: d.a, w: d.w }); break;
@@ -794,17 +584,12 @@ $('shop').addEventListener('click', e => {
     case 'bj': send({ t: 'bj', a: d.x, bet: +$('bjBet').value }); break;
     case 'craps': send({ t: 'craps', a: d.x, bet: +$('crBet').value }); break;
     case 'allin': $(d.for).value = me?.money || 0; break;
-    case 'rbet': {
-      const key = d.k === 'n' ? `n${d.n}` : d.k;
-      rlBets[key] = (rlBets[key] || 0) + Math.max(1, Math.floor(+$('rlChip').value || 0));
-      renderRoul(); break;
-    }
-    case 'rclear': rlBets = {}; renderRoul(); break;
+    case 'rclear': rlBets = {}; break;
     case 'spin': {
       const bets = Object.entries(rlBets).map(([key, amt]) => (key[0] === 'n' ? { k: 'n', n: +key.slice(1), amt } : { k: key, amt }));
-      if (!bets.length) break;
+      if (!bets.length || casino.spinning()) break;
       if (bets.reduce((a, b) => a + b.amt, 0) > (me?.money || 0)) { feed('Not enough cash for those chips'); break; }
-      send({ t: 'roul', bets }); rlBets = {}; renderRoul(); break;
+      send({ t: 'roul', bets }); rlBets = {}; break;
     }
   }
 });
