@@ -1,7 +1,9 @@
 // main.js — rendering, input, networking (PeerJS, host-authoritative) and UI
 import * as THREE from 'three';
-import { lcg, canvasTex, geo, sphere, cap, box, rbox, cyl, mat, mesh, Z_SHIRTS, playerShirt, label, makeGuy } from './art.js';
-import { setupAtmosphere, buildWorld, updateWorld } from './world.js';
+import { lcg, canvasTex, geo, sphere, cap, box, rbox, cyl, mat, mesh, label } from './art.js';
+import { loadAssets, A, pbr, rustyPaint } from './assets.js';
+import { makePerson } from './people.js';
+import { setupAtmosphere, applySky, buildWorld, updateWorld } from './world.js';
 import { createCasino } from './casino3d.js';
 import { createSim, makeRoad, ROAD_W, STEP, WEAPONS, UPGRADES, MAX_LVL, upPrice, SEATS, toWorld } from './sim.js';
 import { handValue, RED } from './casino.js';
@@ -22,45 +24,56 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 1600);
 const sun = setupAtmosphere(scene, renderer);
-const casino = createCasino(renderer);
-function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); casino.resize(); }
+let casino = null; // built once the assets are loaded
+function resize() { renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); casino?.resize(); }
 addEventListener('resize', resize); resize();
 
 
 
 
-const blobGeo = new THREE.CircleGeometry(0.75, 18).rotateX(-Math.PI / 2);
-const blobMat = new THREE.MeshBasicMaterial({ color: '#000', transparent: true, opacity: 0.22, depthWrite: false });
-const ZSKINS = ['#9ccc65', '#8fbf8f', '#a9c26b', '#7fb38a', '#b5c98a'], ZPANTS = ['#4c5a78', '#5b4636', '#3d3d3d', '#6b5b45'];
+const blobGeo = new THREE.CircleGeometry(0.6, 18).rotateX(-Math.PI / 2);
+const blobMat = new THREE.MeshBasicMaterial({ color: '#000', transparent: true, opacity: 0.3, depthWrite: false });
+const Z_TINTS = ['#8a8578', '#7d8790', '#8c7f70', '#6f7a6a', '#958a7a', '#77706a'], HAIR = ['#2a2018', '#4a3020', '#6b6b6b', '#3a2a1a', '#8a7a60', '#1c1a18'];
 function zombieMesh(id, t) {
   const r = lcg(id * 7919 + 13), pick = a => a[Math.floor(r() * a.length)];
-  const z = makeGuy({ zombie: true, seed: id + 1, skin: pick(ZSKINS), shirt: pick(Z_SHIRTS), pants: pick(ZPANTS),
-    hair: r() < 0.5 ? pick(['#3b2a1a', '#666', '#6d4c2f']) : null, shoes: '#3a3a3a' });
-  z.armL.rotation.x = -1.45; z.armR.rotation.x = -1.35;
-  z.head.rotation.z = (r() - 0.5) * 0.5;
-  if (t === 'brute') { z.g.scale.setScalar(1.55); z.torso.scale.x = 1.4; }
-  if (t === 'runner') { z.g.scale.setScalar(0.92); z.body.rotation.x = 0.35; }
+  const sex = t === 'brute' || r() < 0.6 ? 'Male' : 'Female';
+  const z = makePerson({ sex, outfit: r() < 0.75 ? 'Peasant' : 'Ranger', zombie: true, tint: pick(Z_TINTS), hairColor: pick(HAIR),
+    hair: r() < 0.65 ? pick(sex === 'Male' ? ['Hair_Buzzed', 'Hair_SimpleParted', 'Hair_Beard'] : ['Hair_Long', 'Hair_Buns']) : null });
+  z.g.scale.setScalar(t === 'brute' ? 1.3 : t === 'runner' ? 0.97 : 0.92 + r() * 0.12);
   z.g.add(new THREE.Mesh(blobGeo, blobMat));
-  z.t = t; z.spin = 0;
+  z.t = t; z.spin = 0; z.spdS = 0;
+  z.play(t === 'runner' ? 'Sprint' : 'ZWalk');
+  z.mixer.setTime(r() * 3); // out of step with each other
   scene.add(z.g);
   return z;
 }
 
-const GUNS = { pistol: [0.32, '#343a40'], smg: [0.55, '#495057'], shotgun: [0.85, '#8a5a35'], rifle: [1.05, '#5c4033'], minigun: [0.9, '#868e96'], rocket: [1.15, '#2f9e44'] };
+// guns are built along +z and parented to the right hand bone
+const GUNS = { pistol: 0.22, smg: 0.42, shotgun: 0.8, rifle: 0.95, minigun: 0.85, rocket: 1.1 };
 function gunMesh(w) {
-  const [L, c] = GUNS[w];
-  const m = mesh(w === 'rocket' || w === 'minigun' ? cyl(w === 'rocket' ? 0.14 : 0.11, w === 'rocket' ? 0.14 : 0.11, L, 12) : box(0.12, L, 0.18), mat(c, { metalness: 0.3 }));
-  m.position.y = -0.55 - L / 2 + 0.15;
-  return m;
+  const g = new THREE.Group(), metal = mat('#2b2d30', { metalness: 0.7, roughness: 0.45 }), wood = mat('#5a3a22', { roughness: 0.7 });
+  const L = GUNS[w], add = (m, x, y, z) => { m.position.set(x, y, z); g.add(m); return m; };
+  if (w === 'rocket') { add(mesh(cyl(0.07, 0.07, L, 14), mat('#4b5320', { roughness: 0.8 })), 0, 0.05, 0.25).rotation.x = Math.PI / 2; }
+  else if (w === 'minigun') { for (let i = 0; i < 6; i++) add(mesh(cyl(0.012, 0.012, L, 6), metal), Math.cos(i) * 0.035, 0.05 + Math.sin(i) * 0.035, 0.35).rotation.x = Math.PI / 2; add(mesh(cyl(0.06, 0.06, 0.2, 12), metal), 0, 0.05, 0).rotation.x = Math.PI / 2; }
+  else {
+    add(mesh(box(0.035, 0.06, L * 0.55), metal), 0, 0.06, L * 0.2);
+    add(mesh(cyl(0.012, 0.012, L * 0.6, 8), metal), 0, 0.075, L * 0.45).rotation.x = Math.PI / 2;
+    add(mesh(box(0.03, 0.1, 0.04), metal), 0, -0.01, 0);
+    if (w !== 'pistol') add(mesh(box(0.04, 0.07, 0.22), w === 'smg' ? metal : wood), 0, 0.04, -0.14);
+  }
+  g.rotation.set(GUN_ROT.x, GUN_ROT.y, GUN_ROT.z); g.position.copy(GUN_POS);
+  return g;
 }
+const GUN_ROT = new THREE.Euler(0, Math.PI / 2, -Math.PI / 2), GUN_POS = new THREE.Vector3(0, 0.08, 0.03);
 
 // ======================= van =======================
+
 const van = (() => {
   const g = new THREE.Group(), ride = new THREE.Group(), steel = mat('#adb5bd', { metalness: 0.6, roughness: 0.35 });
   g.add(ride);
   const add = (m, x, y, z, parent = ride) => { m.position.set(x, y, z); parent.add(m); return m; };
-  add(mesh(rbox(2.4, 1.0, 5.4, 0.3), mat('#fff3d6')), 0, 1.05, 0);
-  add(mesh(rbox(2.34, 1.25, 5.2, 0.4), mat('#33b5c7')), 0, 2.0, 0);
+  const lower = add(mesh(rbox(2.4, 1.0, 5.4, 0.3), mat('#fff3d6')), 0, 1.05, 0);
+  const upper = add(mesh(rbox(2.34, 1.25, 5.2, 0.4), mat('#33b5c7')), 0, 2.0, 0);
   const glass = mat('#27406e', { roughness: 0.1, metalness: 0.4 });
   add(mesh(box(2.0, 0.7, 0.1), glass), 0, 2.1, 2.6).rotation.x = -0.12;
   for (const s of [1, -1]) {
@@ -69,7 +82,13 @@ const van = (() => {
     add(mesh(box(0.08, 0.08, 4.2), steel), 1.0 * s, 2.75, -0.3);
   }
   add(mesh(box(1.8, 0.5, 0.08), glass), 0, 2.15, -2.62);
-  add(mesh(cyl(0.32, 0.32, 0.08, 20), mat('#ffffff')), 0, 1.45, 2.72).rotation.x = Math.PI / 2;
+  for (let i = 0; i < 5; i++) add(mesh(box(1.3, 0.04, 0.06), mat('#1d1f21', { metalness: 0.6, roughness: 0.5 })), 0, 1.25 + i * 0.07, 2.72); // grille slats
+  for (const s of [1, -1]) add(mesh(box(0.08, 0.22, 0.14), mat('#1d1f21')), 1.27 * s, 2.0, 1.9); // mirrors
+  // survivor gear lashed to the roof rack
+  add(mesh(box(0.7, 0.42, 0.55), mat('#6b5233', { roughness: 0.9 })), 0.35, 2.85, 1.5);
+  add(mesh(box(0.55, 0.36, 0.45), mat('#5c4a30', { roughness: 0.9 })), -0.4, 2.82, 1.35);
+  for (const [x, c] of [[0.75, '#7a1f1a'], [0.95, '#3f5a2a']]) add(mesh(box(0.16, 0.42, 0.32), mat(c, { roughness: 0.5, metalness: 0.3 })), x, 2.85, 2.1);
+  add(mesh(cyl(0.38, 0.38, 0.22, 16), mat('#1d1d1d', { roughness: 1 })), -0.5, 2.76, 2.05);
   add(mesh(box(2.5, 0.28, 0.35), mat('#2b2d33')), 0, 0.65, 2.7);
   add(mesh(box(2.5, 0.28, 0.35), mat('#2b2d33')), 0, 0.65, -2.7);
   const wheels = [[1.1, 1.7], [-1.1, 1.7], [1.1, -1.7], [-1.1, -1.7]].map(([x, z]) => {
@@ -83,13 +102,13 @@ const van = (() => {
   add(mesh(box(2.9, 1.0, 0.18), steel), 0, 0.85, 3.05, plow).rotation.x = -0.35;
   const spikes = [-1.2, 1.2, -0.7, 0.7, -0.2, 0.2].map(x => { const c = add(mesh(geo('spike', () => new THREE.ConeGeometry(0.1, 0.5, 8)), steel), x, 0.9, 3.35, plow); c.rotation.x = Math.PI / 2; return c; });
   const armor = new THREE.Group(); add(armor, 0, 0, 0);
-  for (const s of [1, -1]) add(mesh(box(0.1, 0.8, 4.4), mat('#868e96', { metalness: 0.5 })), 1.27 * s, 1.2, 0, armor);
+  const plates = [1, -1].map(s => add(mesh(box(0.1, 0.8, 4.4), mat('#868e96', { metalness: 0.5 })), 1.27 * s, 1.2, 0, armor));
   const grates = new THREE.Group(); add(grates, 0, 0, 0);
   for (const s of [1, -1]) add(mesh(geo('grate', () => new THREE.BoxGeometry(0.04, 0.6, 3.6, 1, 3, 14)), mat('#343a40', { wireframe: true })), 1.24 * s, 2.15, -0.5, grates);
   const stacks = new THREE.Group(); add(stacks, 0, 0, 0);
   for (const s of [1, -1]) add(mesh(cyl(0.1, 0.12, 1, 10), steel), 0.85 * s, 2.9, -2.3, stacks);
   const spare = add(mesh(cyl(0.45, 0.45, 0.3, 18), mat('#2b2d33')), 0, 1.6, -2.85); spare.rotation.x = Math.PI / 2;
-  const cargo = add(mesh(rbox(1.4, 0.5, 1.2, 0.1), mat('#e8590c')), 0, 2.95, -1.0);
+  const cargo = add(mesh(rbox(1.4, 0.5, 1.2, 0.1), mat('#4b5320', { roughness: 0.9 })), 0, 2.95, -1.0);
   function looks(up) {
     plow.visible = up.plow > 0; plow.scale.x = 1 + 0.04 * up.plow;
     spikes.forEach((c, i) => (c.visible = i < up.plow));
@@ -102,7 +121,12 @@ const van = (() => {
   }
   looks({ engine: 0, tires: 0, body: 0, armor: 0, plow: 0 });
   scene.add(g);
-  return { g, ride, wheels, looks, spin: 0 };
+  // once the textures are in: faded paint with rust breaking through, rusty armor plates
+  function realism() {
+    lower.material = rustyPaint('#bdb39c', 0.55); upper.material = rustyPaint('#4d7c84', 0.4);
+    plates.forEach(p => (p.material = pbr('rust_coarse_01', [3, 0.6], { metalness: 0.6 })));
+  }
+  return { g, ride, wheels, looks, realism, spin: 0 };
 })();
 
 
@@ -121,7 +145,7 @@ function addTracer(e, fromY) {
 function burst(x, y, z, n, color, spd, size = 1) {
   for (let i = 0; i < n; i++) {
     let p = particles.find(p => p.life <= 0);
-    if (!p) { if (particles.length > 260) return; p = { m: mesh(sphere(0.14), mat(color), false) }; scene.add(p.m); particles.push(p); }
+    if (!p) { if (particles.length > 260) return; p = { m: mesh(sphere(0.07), mat(color), false) }; scene.add(p.m); particles.push(p); }
     p.m.material = mat(color); p.m.visible = true; p.m.position.set(x, y, z);
     p.v = [(Math.random() - 0.5) * spd, Math.random() * spd * 0.8 + 2, (Math.random() - 0.5) * spd];
     p.life = 0.5 + Math.random() * 0.4; p.size = size * (0.6 + Math.random() * 0.8);
@@ -262,6 +286,17 @@ const localInput = () => ({
 });
 
 // ======================= snapshot → scene =======================
+function crewMember(p) {
+  const r = lcg([...p.id].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) % 2147483646 + 1), female = r() < 0.5;
+  const c = makePerson({ sex: female ? 'Female' : 'Male', outfit: 'Ranger', shadows: true,
+    hair: female ? ['Hair_Long', 'Hair_Buns'][Math.floor(r() * 2)] : ['Hair_SimpleParted', 'Hair_Buzzed', 'Hair_Beard'][Math.floor(r() * 3)],
+    hairColor: ['#2a2018', '#4a3020', '#7a5a3a', '#1c1a18'][Math.floor(r() * 4)],
+    tint: '#' + new THREE.Color('#ffffff').lerp(new THREE.Color(p.color), 0.45).getHexString() });
+  c.color = p.color;
+  c.label = label(p.name, p.color); c.label.position.y = 2.25; c.label.scale.multiplyScalar(0.8); c.g.add(c.label);
+  c.play('PistolIdle');
+  return c;
+}
 const zm = new Map(), pm = new Map(), vd = { x: 0, z: 0, h: 0, spd: 0 };
 let lastUp = '', builtSeed = null;
 function onSnap(s) {
@@ -279,10 +314,11 @@ function onSnap(s) {
     const mine = e.p === myId;
     if (e.k === 'tr') {
       addTracer(e, shooterY(e.p));
+      const shooter = pm.get(e.p); if (shooter) shooter.firedAt = clock;
       if (performance.now() - lastShot > 35 || e.w === 'rocket') { lastShot = performance.now(); SFX.shot(e.w, mine); }
-    } else if (e.k === 'hit') burst(e.x, 1.4, e.z, 4, '#76c442', 5);
+    } else if (e.k === 'hit') burst(e.x, 1.4, e.z, 4, '#5a0d0a', 5);
     else if (e.k === 'kill') {
-      burst(e.x, 1.2, e.z, e.ram ? 18 : 10, '#76c442', e.ram ? 12 : 7, 1.3);
+      burst(e.x, 1.2, e.z, e.ram ? 18 : 10, '#4a0a08', e.ram ? 12 : 7, 1.3);
       SFX.kill();
       if (mine) { popup(`+$${e.cash}`, e.x, e.z); SFX.coin(); }
     } else if (e.k === 'boom') { burst(e.x, 1, e.z, 26, '#ff922b', 14, 2.2); burst(e.x, 1, e.z, 10, '#ffd43b', 8, 2.6); SFX.boom(); shake = Math.max(shake, 0.5); }
@@ -303,18 +339,13 @@ function onSnap(s) {
     let c = pm.get(p.id);
     if (!c || c.color !== p.color) {
       if (c) van.g.remove(c.g);
-      const r = lcg(p.id.length * 31 + p.id.charCodeAt(0));
-      c = makeGuy({ seed: 3, skin: ['#ffd3b0', '#e8b48a', '#c68d63', '#8d5a3b'][Math.floor(r() * 4)], shirt: playerShirt(p.color), pants: '#c9a26b', hair: ['#3b2a1a', '#e0c068', '#7a3e1d', '#222'][Math.floor(r() * 4)] });
-      c.color = p.color;
-      c.armR.rotation.x = -Math.PI / 2; c.armL.rotation.set(-1.25, -0.5, 0);
-      c.g.scale.setScalar(0.85);
-      c.label = label(p.name, p.color); c.label.position.y = 3.3; c.g.add(c.label);
+      c = crewMember(p);
       van.g.add(c.g); pm.set(p.id, c);
     }
     c.p = p;
     let w = p.weapon;
     if (w !== 'pistol' && !(p.ammo[w] > 0)) w = 'pistol';
-    if (c.gunKey !== w) { if (c.gun) c.armR.remove(c.gun); c.gun = gunMesh(w); c.armR.add(c.gun); c.gunKey = w; }
+    if (c.gunKey !== w) { if (c.gun) c.bones.hand_r.remove(c.gun); c.gun = gunMesh(w); c.bones.hand_r.add(c.gun); c.gunKey = w; }
   }
   for (const [id, c] of pm) if (!s.ps.some(p => p.id === id)) { van.g.remove(c.g); pm.delete(id); }
   if (s.ph !== prev) showPhase(s.ph);
@@ -329,7 +360,6 @@ const camPos = new THREE.Vector3(14, 9, -14), camLook = new THREE.Vector3(), ray
 const aimRing = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.7, 28).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#ffd43b', transparent: true, opacity: 0.8, depthWrite: false }));
 scene.add(aimRing);
 let snapCam = true, orbit = 0, last = performance.now(), netT = 0, sendT = 0, clock = 0;
-buildWorld(scene, makeRoad(7, 1), 1, 7); // scenery behind the title screen
 
 // The host simulates on a Worker timer: rAF stops in background tabs, and the host alt-tabbing must not freeze everyone.
 const ticker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 16)'])));
@@ -388,6 +418,7 @@ function render(dt) {
   shake = Math.max(0, shake - dt * 1.5);
   camera.position.copy(camPos).add(new THREE.Vector3((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, 0));
   camera.lookAt(camLook);
+  if (window.lv?.cam) { camera.position.copy(lv.cam.p); camera.lookAt(lv.cam.l); } // localhost debug only
   sun.position.set(vd.x + 30, 55, vd.z + 20); sun.target.position.set(vd.x, 0, vd.z);
 
   // aim point = mouse ray on a plane at zombie chest height
@@ -400,12 +431,13 @@ function render(dt) {
   // crew
   for (const c of pm.values()) {
     const seat = SEATS[c.p.seat] || SEATS[3], driver = c.p.seat === 0;
-    c.body.visible = !driver; // the driver sits inside the cab; only their name tag shows
+    c.g.children.forEach(ch => (ch.visible = ch === c.label || !driver)); // the driver sits inside the cab; only their name tag shows
     c.g.position.set(seat[0], driver ? 1.6 : 2.62 + van.ride.position.y, seat[1]);
     const [wx, wz] = toWorld(vd, seat[0], seat[1]);
     const a = c.p.id === myId ? [aim.x, aim.z] : c.p.aim;
-    c.g.rotation.y = driver ? 0 : Math.atan2(a[0] - wx, a[1] - wz) - vd.h;
-    c.body.position.y = Math.abs(Math.sin(clock * 6 + c.ph)) * 0.04;
+    c.g.rotation.y += angDiff(driver ? 0 : Math.atan2(a[0] - wx, a[1] - wz) - vd.h, c.g.rotation.y) * Math.min(1, dt * 12);
+    c.play(driver ? 'Driving' : clock - (c.firedAt ?? -9) < 0.6 ? 'Aim' : 'PistolIdle', { fade: 0.15 });
+    c.mixer.update(dt);
   }
 
   // zombies
@@ -413,18 +445,20 @@ function render(dt) {
   for (const z of zm.values()) {
     const p = z.g.position, ox = p.x, oz = p.z;
     p.x += (z.tx - p.x) * kz; p.z += (z.tz - p.z) * kz; p.y += (z.ty - p.y) * kz;
-    if (z.st === 1) { // dead: tumble, then lie flat
-      if (p.y > 0.05) z.spin += dt * 12; else z.spin += (-Math.PI / 2 - (z.spin % (Math.PI * 2))) * Math.min(1, dt * 8);
-      z.body.rotation.x = z.spin;
+    if (z.st === 1) { // dead: play the fall, tumbling while a ram has it airborne
+      z.play('Death', { once: true, fade: 0.08 });
+      z.g.rotation.x = p.y > 0.05 ? (z.spin += dt * 9) : 0;
+      z.mixer.update(dt);
       continue;
     }
     z.g.rotation.y += angDiff(z.th, z.g.rotation.y) * Math.min(1, dt * 10);
-    const spd = Math.hypot(p.x - ox, p.z - oz) / Math.max(dt, 1e-3);
-    z.ph += dt * (3 + spd * 2.2);
-    const sw = Math.sin(z.ph) * Math.min(0.8, spd * 0.25);
-    z.legL.rotation.x = sw; z.legR.rotation.x = -sw;
-    const flail = z.st === 2 ? Math.sin(clock * 14 + z.ph) * 0.5 : Math.sin(z.ph) * 0.1;
-    z.armL.rotation.x = -1.45 + flail; z.armR.rotation.x = -1.35 - flail;
+    z.spdS += (Math.hypot(p.x - ox, p.z - oz) / Math.max(dt, 1e-3) - z.spdS) * Math.min(1, dt * 6);
+    if (z.st === 2) z.play('ZAttack', { speed: 1.3 });
+    else if (z.spdS < 0.3) z.play('ZIdle');
+    else if (z.t === 'runner') z.play('Sprint', { speed: THREE.MathUtils.clamp(z.spdS / 5.5, 0.6, 1.4) });
+    else z.play('ZWalk', { speed: THREE.MathUtils.clamp(z.spdS / (z.t === 'brute' ? 1.3 : 1.0), 0.5, 2.6) });
+    // ponytail: every zombie animates every frame; skip far ones if the frame rate suffers
+    z.mixer.update(dt);
   }
 
   for (const t of tracers) if (t.life > 0 && (t.life -= dt) <= 0) t.m.visible = false;
@@ -448,7 +482,7 @@ function render(dt) {
   else renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
-if (location.hostname === 'localhost') window.lv = { get sim() { return sim; }, get view() { return view; }, zm, camera, casino };
+if (location.hostname === 'localhost') window.lv = { get sim() { return sim; }, get view() { return view; }, zm, camera, renderer, scene, get casino() { return casino; } };
 
 // ======================= UI =======================
 function showPhase(ph) {
@@ -600,6 +634,15 @@ try { $('name').value = localStorage.getItem('luckyvan.name') || ''; } catch (_)
 const saveName = () => { try { localStorage.setItem('luckyvan.name', myName()); } catch (_) { /* storage blocked */ } };
 const room = new URLSearchParams(location.search).get('room');
 if (room) $('code').value = room;
+for (const b of ['bSolo', 'bHost', 'bJoin']) $(b).disabled = true;
+loadAssets(p => tmsg(`Loading the apocalypse… ${Math.round(p * 100)}%`)).then(() => {
+  applySky(scene, renderer);
+  van.realism();
+  casino = createCasino(renderer);
+  buildWorld(scene, makeRoad(7, 1), 1, 7); // scenery behind the title screen
+  for (const b of ['bSolo', 'bHost', 'bJoin']) $(b).disabled = false;
+  tmsg('');
+}).catch(e => { console.error(e); tmsg('Could not load the game assets. Refresh to try again.'); });
 $('bSolo').onclick = () => { saveName(); hostGame(true); };
 $('bHost').onclick = () => { saveName(); hostGame(false); };
 $('bJoin').onclick = () => { saveName(); joinGame($('code').value); };

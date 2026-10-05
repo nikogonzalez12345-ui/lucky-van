@@ -1,6 +1,7 @@
 // casino3d.js — the casino in the back of the van: blackjack, craps and roulette tables you play in 3D
 import * as THREE from 'three';
-import { lcg, canvasTex, geo, box, rbox, cyl, sphere, mat, mesh, makeGuy, playerShirt, label } from './art.js';
+import { lcg, canvasTex, geo, box, rbox, cyl, sphere, mat, mesh, label } from './art.js';
+import { makePerson } from './people.js';
 import { RED } from './casino.js';
 
 const WHEEL = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
@@ -134,11 +135,10 @@ export function createCasino(renderer) {
     lampShade.add(new THREE.Mesh(sphere(0.12), new THREE.MeshBasicMaterial({ color: '#fff3c4' })));
     add(mesh(cyl(0.01, 0.01, 0.9, 4), mat('#222')), 0, 3.1, 0, g);
     add(new THREE.PointLight('#ffd9a0', 9, 7, 1.6), 0, 2.3, 0, g);
-    const dealer = makeGuy({ zombie: true, seed: def.z * 10 + 50, skin: '#9cbf7a', shirt: mat('#7a1f2b'), pants: '#1d1d1f', hair: '#3b2a1a', shoes: '#111' });
-    dealer.g.position.set(1.35, 0, 0); dealer.g.rotation.y = -Math.PI / 2; dealer.g.scale.setScalar(0.92);
-    dealer.armL.rotation.x = dealer.armR.rotation.x = -1.0;
-    const visor = mesh(cyl(0.5, 0.5, 0.03, 20, 1, false, -Math.PI / 2, Math.PI), mat('#2f9e44', { transparent: true, opacity: 0.7 }), false);
-    visor.position.set(0, 0.3, 0.15); dealer.head.add(visor);
+    // the croupiers are zombies too, in waistcoats, still working their shift
+    const dealer = makePerson({ sex: def.z > 0 ? 'Male' : 'Female', outfit: 'Peasant', zombie: true, tint: '#8a4a4a', hair: def.z > 0 ? 'Hair_SimpleParted' : 'Hair_Buns', hairColor: '#2a2018' });
+    dealer.g.position.set(1.15, 0, 0); dealer.g.rotation.y = -Math.PI / 2;
+    dealer.play('ZIdle'); dealer.mixer.setTime(def.z);
     g.add(dealer.g);
     T[key] = { g, dealer };
   }
@@ -210,13 +210,15 @@ export function createCasino(renderer) {
       let f = friends.get(p.id);
       if (p.id === myId || !p.at) { if (f) f.g.visible = false; continue; }
       if (!f) {
-        f = makeGuy({ seed: 3, skin: '#e8b48a', shirt: playerShirt(p.color), pants: '#c9a26b', hair: '#3b2a1a' });
-        const l = label(p.name, p.color); l.position.y = 3.1; l.scale.multiplyScalar(0.6); f.g.add(l);
-        f.armL.rotation.x = f.armR.rotation.x = -0.5;
+        const female = p.id.length % 2 === 1;
+        f = makePerson({ sex: female ? 'Female' : 'Male', outfit: 'Ranger', hair: female ? 'Hair_Long' : 'Hair_SimpleParted', hairColor: '#3a2a1a',
+          tint: '#' + new THREE.Color('#ffffff').lerp(new THREE.Color(p.color), 0.45).getHexString() });
+        const l = label(p.name, p.color); l.position.y = 2.2; l.scale.multiplyScalar(0.6); f.g.add(l);
+        f.play('Idle'); f.mixer.setTime(Math.random() * 3);
         scene.add(f.g); friends.set(p.id, f);
       }
       const s = slots[p.at]++;
-      f.g.visible = true; f.g.scale.setScalar(0.85);
+      f.g.visible = true;
       const tz = TABLES[p.at].z, x = -0.15 + (s > 1 ? 0.6 : 0), z = tz + (s % 2 ? 2.1 : -2.1);
       f.g.position.set(x, 0, z); f.g.rotation.y = Math.atan2(0.2 - x, tz - z); // stand at the table's ends, facing the felt
     }
@@ -304,7 +306,8 @@ export function createCasino(renderer) {
         d.rotation.set(a.final.x + a.spin[0] * left, a.final.y + a.spin[1] * left, a.final.z + a.spin[2] * left);
         if (a.t >= 1) d.anim = null;
       }
-      for (const key in T) { const dl = T[key].dealer; dl.body.position.y = Math.abs(Math.sin(t * 2 + key.length)) * 0.03; dl.head.rotation.z = Math.sin(t * 1.3 + key.length) * 0.15; }
+      for (const key in T) T[key].dealer.mixer.update(dt);
+      for (const f of friends.values()) if (f.g.visible) f.mixer.update(dt);
       wheel.rotation.y += dt * (spin ? 2.2 * (1 - spin.t) + 0.4 : 0.4);
       if (spin) {
         spin.t = Math.min(1, spin.t + dt / 3.4);
